@@ -50,6 +50,7 @@ struct timer_list
     // struct ipq *frags;
 };
 
+/* 链表-保存相同hash_index的ipq */
 struct hostfrags
 {
     struct ipq *ipqueue;
@@ -60,6 +61,7 @@ struct hostfrags
     struct hostfrags *next;
 };
 
+/* 链表-保存相同的ip分片,IP识别码相同 */
 /* Describe an IP fragment. */
 struct ipfrag
 {
@@ -72,6 +74,7 @@ struct ipfrag
     struct ipfrag *prev;
 };
 
+/* 链表-保存相同mac的ip分片链表ipfrag, 有各种IP识别码 */
 /* Describe an entry in the "incomplete datagrams" queue. */
 struct ipq
 {
@@ -566,11 +569,13 @@ ip_defrag(struct ip *iph, struct sk_buff *skb)
     if (!hostfrag_find(iph) && skb)
         hostfrag_create(iph);
 
+    /* IP分片长度检查 */
     /* Start by cleaning up the memory. */
     if (this_host)
         if (this_host->ip_frag_mem > IPFRAG_HIGH_THRESH)
             ip_evictor();
 
+    /* 在ipq链表中查询IP分片 */
     /* Find the entry of this IP datagram in the "incomplete datagrams" queue. */
     if (this_host)
         qp = ip_find(iph);
@@ -583,9 +588,9 @@ ip_defrag(struct ip *iph, struct sk_buff *skb)
     offset &= IP_OFFSET;
     if (((flags & IP_MF) == 0) && (offset == 0))
     {
+        /* 非IP分片,删除iqp, 为什么删除,为什么不直接等超时,或者为什么会根据非IP分片查询到iqp? */
         if (qp != NULL)
-            ip_free(qp);      /* Fragmented frame replaced by full
-                   unfragmented copy */
+            ip_free(qp);      /* Fragmented frame replaced by full unfragmented copy */
         return 0;
     }
 
@@ -607,9 +612,11 @@ ip_defrag(struct ip *iph, struct sk_buff *skb)
            IP header (with options) */
         if (offset == 0)
         {
+            /* 如果IP分片是第一分片,更新IP头信息, ihl + 8?for icmp? */
             qp->ihlen = ihl;
             memcpy(qp->iph, iph, ihl + 8);
         }
+        /* 更新过期时间 */
         del_timer(&qp->timer);
         qp->timer.expires = jiffies() + IP_FRAG_TIME;   /* about 30 seconds */
         qp->timer.data = (unsigned long) qp;    /* pointer to queue */
@@ -618,6 +625,7 @@ ip_defrag(struct ip *iph, struct sk_buff *skb)
     }
     else
     {
+        /* 创建ipq链表头 */
         /* If we failed to create it, then discard the frame. */
         if ((qp = ip_create(iph)) == NULL)
         {
@@ -749,6 +757,8 @@ ip_defrag_stub(struct ip *iph, struct ip **defrag)
 
     numpack++;
     timenow = 0;
+
+    /* 处理超时分片,从hostfrags中删除这个超时ipq */
     while (timer_head && timer_head->expires < jiffies())
     {
         this_host = ((struct ipq *) (timer_head->data))->hf;
@@ -757,11 +767,14 @@ ip_defrag_stub(struct ip *iph, struct ip **defrag)
     offset = ntohs(iph->ip_off);
     flags = offset & ~IP_OFFSET;
     offset &= IP_OFFSET;
+    /* 是否IP分片 */
     if (((flags & IP_MF) == 0) && (offset == 0))
     {
+        /* 非IP分片报文 */
         ip_defrag(iph, 0);
         return IPF_NOTF;
     }
+    /* 是IP分片报文 */
     tot_len = ntohs(iph->ip_len);
     skb = (struct sk_buff *) malloc(tot_len + sizeof(struct sk_buff));
     if (!skb)
