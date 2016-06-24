@@ -536,8 +536,10 @@ tcp_queue(struct tcp_stream * a_tcp, struct tcphdr * this_tcphdr,
      * Did we get anything new to ack?
      */
 
+	/* 当前序列号是否小于等于期望序列号 */
     if (!after(this_seq, EXP_SEQ))
     {
+		/* 当前负载数据是否有没有被确认过的 */
         if (after(this_seq + datalen + (this_tcphdr->th_flags & TH_FIN), EXP_SEQ))
         {
             /* the packet straddles our window end */
@@ -550,6 +552,7 @@ tcp_queue(struct tcp_stream * a_tcp, struct tcphdr * this_tcphdr,
              * Do we have any old packets to ack that the above
              * made visible? (Go forward from skb)
              */
+			/* 从乱序包中还原数据 */
             pakiet = rcv->list;
             while (pakiet)
             {
@@ -581,6 +584,7 @@ tcp_queue(struct tcp_stream * a_tcp, struct tcphdr * this_tcphdr,
     }
     else
     {
+		/* 保存乱序包 */
         struct skbuff *p = rcv->listtail;
 
         pakiet = mknew(struct skbuff);
@@ -910,6 +914,7 @@ process_tcp(u_char * data, int skblen)
 
                     a_tcp->server.state = TCP_ESTABLISHED;
                     a_tcp->nids_state = NIDS_JUST_EST;
+					/* 遍历回调函数, 回调函数决定是否关心该连接,将关心该连接的回调函数挂接到该连接结构上 */
                     for (i = tcp_procs; i; i = i->next)
                     {
                         char whatto = 0;
@@ -950,6 +955,7 @@ process_tcp(u_char * data, int skblen)
                             a_tcp->listeners = j;
                         }
                     }
+					/* 如果没有一个回调函数关注该连接,则释放该连接,否则更改连接状态开始接收数据 */
                     if (!a_tcp->listeners)
                     {
                         nids_free_tcp_stream(a_tcp);
@@ -961,6 +967,7 @@ process_tcp(u_char * data, int skblen)
             // return;
         }
     }
+	/* TCP连接挥手 */
     if ((this_tcphdr->th_flags & TH_ACK))
     {
         handle_ack(snd, ntohl(this_tcphdr->th_ack));
@@ -977,6 +984,7 @@ process_tcp(u_char * data, int skblen)
             return;
         }
     }
+	/* 数据处理, 数据还原 */
     if (datalen + (this_tcphdr->th_flags & TH_FIN) > 0)
         tcp_queue(a_tcp, this_tcphdr, snd, rcv,
                   (char *) (this_tcphdr) + 4 * this_tcphdr->th_off,
